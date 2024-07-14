@@ -14,6 +14,8 @@
 #define DEFAULT_CHANNELS        2
 #define DEFAULT_VOLUME          0.7
 
+void analyze_audio_for_bpm(void* audio_data, size_t size);
+
 struct data {
         struct pw_main_loop *loop;
         struct pw_stream *stream;
@@ -24,47 +26,31 @@ struct data {
 static void on_process(void *userdata)
 {
         struct data *data = userdata;
-        struct pw_buffer *b;
-        struct spa_buffer *buf;
-        int i, c, n_frames, stride;
-        int16_t *dst, val;
- 
-        if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
-                pw_log_warn("out of buffers: %m");
+        struct pw_buffer *buffer;
+        struct spa_buffer *spa_buffer;
+        void *ptr;
+        uint32_t size;
+
+        if ((buffer = pw_stream_dequeue_buffer(data->stream)) == NULL) {
+                fprintf(stderr, "out of buffers\n");
                 return;
         }
- 
-        buf = b->buffer;
-        if ((dst = buf->datas[0].data) == NULL)
-                return;
- 
-        stride = sizeof(int16_t) * DEFAULT_CHANNELS;
-        n_frames = buf->datas[0].maxsize / stride;
-        if (b->requested)
-                n_frames = SPA_MIN(b->requested, n_frames);
- 
-        for (i = 0; i < n_frames; i++) {
-                data->accumulator += M_PI_M2 * 440 / DEFAULT_RATE;
-                if (data->accumulator >= M_PI_M2)
-                        data->accumulator -= M_PI_M2;
- 
-                /* sin() gives a value between -1.0 and 1.0, we first apply
-                 * the volume and then scale with 32767.0 to get a 16 bits value
-                 * between [-32767 32767].
-                 * Another common method to convert a double to
-                 * 16 bits is to multiple by 32768.0 and then clamp to
-                 * [-32768 32767] to get the full 16 bits range. */
-                val = sin(data->accumulator) * DEFAULT_VOLUME * 32767.0;
-                for (c = 0; c < DEFAULT_CHANNELS; c++)
-                        *dst++ = val;
-        }
- 
-        buf->datas[0].chunk->offset = 0;
-        buf->datas[0].chunk->stride = stride;
-        buf->datas[0].chunk->size = n_frames * stride;
- 
-        pw_stream_queue_buffer(data->stream, b);
+
+        spa_buffer = buffer->buffer;
+        ptr = spa_buffer->datas[0].data;
+        size = spa_buffer->datas[0].chunk->size;
+
+        fprintf(stdout, "processing %d bytes at %p\n", size, ptr);
+        analyze_audio_for_bpm(&ptr, size);
+
+        pw_stream_queue_buffer(data->stream, buffer);
 }
+
+void analyze_audio_for_bpm(void* audio_data, size_t size)
+{
+    // Analyze audio data for BPM
+}
+
 /* [on_process] */
 
 static const struct pw_stream_events stream_events = {
@@ -83,10 +69,10 @@ int main(int argc, char *argv[])
         pw_init(&argc, &argv);
         data.loop = pw_main_loop_new(NULL);
         data.stream = pw_stream_new_simple(
-                pw_main_loop_get_loop(data.loop), 
-                "audio-src", 
+                pw_main_loop_get_loop(data.loop),
+                "audio-src",
                 pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback",PW_KEY_MEDIA_ROLE, "Music", NULL), 
-                &stream_events, 
+                &stream_events,
                 &data);
 
                 params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
@@ -96,7 +82,7 @@ int main(int argc, char *argv[])
                                 .rate = DEFAULT_RATE ));
  
         pw_stream_connect(data.stream,
-                          PW_DIRECTION_OUTPUT,
+                          PW_DIRECTION_INPUT,
                           PW_ID_ANY,
                           PW_STREAM_FLAG_AUTOCONNECT |
                           PW_STREAM_FLAG_MAP_BUFFERS |
